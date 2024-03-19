@@ -1,0 +1,72 @@
+image: docker:latest
+
+stages:
+  - test
+  - deploy
+
+.if-develop-branch: &if-develop-branch
+  if: '$CI_COMMIT_BRANCH == "develop"'
+
+.if-staging-branch: &if-staging-branch
+  if: '$CI_COMMIT_BRANCH == "staging"'
+
+.if-staging-branch: &if-production-branch
+  if: '$CI_COMMIT_BRANCH == "production"'
+
+workflow:
+  rules:
+    # For `develop` branch, create a pipeline (this includes on schedules, pushes, merges, etc.).
+    - <<: *if-develop-branch
+    # For `staging` branch, create a pipeline (this includes on schedules, pushes, merges, etc.).
+    - <<: *if-staging-branch
+    # For `staging` branch, create a pipeline (this includes on schedules, pushes, merges, etc.).
+    - <<: *if-production-branch
+
+sast:
+  stage: test
+include:
+- template: Security/SAST.gitlab-ci.yml
+  only:
+    - develop
+    - staging
+
+deploy:
+  stage: deploy
+  image: google/cloud-sdk
+  services:
+    - docker:dind
+  script:
+    - echo $DEV_GCP_SERVICE_KEY > gcloud-service-key.json; # Google Cloud service accounts
+    - gcloud auth activate-service-account --key-file gcloud-service-key.json
+    - gcloud config set project $DEV_GCP_PROJECT_ID
+    - gcloud builds submit . --config=cloudbuild.dev.yaml
+  only:
+    - develop
+
+deploy_staging:
+  stage: deploy
+  image: google/cloud-sdk
+  services:
+    - docker:dind
+  script:
+    - echo $GCP_SERVICE_KEY > gcloud-service-key.json; # Google Cloud service accounts
+    - gcloud auth activate-service-account --key-file gcloud-service-key.json
+    - gcloud config set project $GCP_PROJECT_ID
+    - gcloud builds submit . --config=cloudbuild.staging.yaml --substitutions=TAG_NAME=$TAG_NAME
+  when: manual
+  only:
+    - staging
+
+deploy_production:
+  stage: deploy
+  image: google/cloud-sdk
+  services:
+    - docker:dind
+  script:
+    - echo $GCP_SERVICE_KEY > gcloud-service-key.json; # Google Cloud service accounts
+    - gcloud auth activate-service-account --key-file gcloud-service-key.json
+    - gcloud config set project $GCP_PROJECT_ID
+    - gcloud builds submit . --config=cloudbuild.prod.yaml --substitutions=TAG_NAME=$TAG_NAME
+  when: manual
+  only:
+    - production
